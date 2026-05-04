@@ -22,14 +22,20 @@ interface IndexStatus {
   last_indexed: string;
 }
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+}
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [status, setStatus] = useState<IndexStatus>({
-    file_count: 0,
-    index_size_mb: 0,
-    last_indexed: '--:--:--',
-  });
+  const [status, setStatus] = useState<IndexStatus>({ file_count: 0, index_size_mb: 0, last_indexed: '--:--:--' });
   const [isSearching, setIsSearching] = useState(false);
   const [searchTime, setSearchTime] = useState(0);
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string } | null>(null);
@@ -37,13 +43,65 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [extensionFilter, setExtensionFilter] = useState('');
-  
+  const [config, setConfig] = useState<any>(null);
+  const [sortBy, setSortBy] = useState('relevance');
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const debounceRef = useRef<any>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) setConfig(await res.json());
+    } catch (e) { console.error("Failed to fetch config", e); }
+  };
+
+  const openExternal = async (path: string) => {
+    try {
+      await fetch('/api/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+    } catch (e) { console.error("Failed to open file", e); }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch('/api/search-history');
+      if (res.ok) { const d = await res.json(); setSearchHistory(d.history || []); }
+    } catch {}
+  };
+
+  const saveFile = async (filePath: string, content: string) => {
+    try {
+      const res = await fetch('/api/save', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, content }) });
+      if (res.ok) { setPreviewFile({ path: filePath, content }); setIsEditing(false); setUploadStatus({ type: 'success', msg: 'File saved!' }); setTimeout(() => setUploadStatus(null), 3000); }
+    } catch { setUploadStatus({ type: 'error', msg: 'Save failed' }); setTimeout(() => setUploadStatus(null), 3000); }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault(); setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+    setIsUploading(true);
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (res.ok) { setUploadStatus({ type: 'success', msg: `Uploaded ${files.length} file(s)` }); fetchStatus(); handleSearch(query); }
+      else setUploadStatus({ type: 'error', msg: 'Upload failed' });
+    } catch { setUploadStatus({ type: 'error', msg: 'Upload error' }); }
+    finally { setIsUploading(false); setTimeout(() => setUploadStatus(null), 4000); }
+  };
+
   useEffect(() => {
-    fetchStatus();
-    handleSearch('', '');
+    fetchStatus(); fetchConfig(); fetchHistory(); handleSearch('', '');
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -57,24 +115,22 @@ export default function App() {
     }
   };
 
-  const handleSearch = async (val: string, ext: string = extensionFilter) => {
-    setQuery(val);
-    setExtensionFilter(ext);
-    
+  const doSearch = async (val: string, ext: string, sort: string) => {
     setIsSearching(true);
-    const start = performance.now();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(val)}&ext=${ext}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(val)}&ext=${ext}&sort=${sort}&limit=50`);
       if (res.ok) {
         const data = await res.json();
         setResults(data.results || []);
-        setSearchTime(Math.round(performance.now() - start));
+        setSearchTime(data.query_time_ms ?? 0);
       }
-    } catch (e) {
-      console.error("Search failed", e);
-    } finally {
-      setIsSearching(false);
-    }
+    } catch {} finally { setIsSearching(false); }
+  };
+
+  const handleSearch = (val: string, ext: string = extensionFilter, sort: string = sortBy) => {
+    setQuery(val); setExtensionFilter(ext); setSortBy(sort); setShowHistory(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSearch(val, ext, sort), 150);
   };
 
   const previewDocument = async (path: string) => {
@@ -106,47 +162,31 @@ export default function App() {
     }
   };
 
-  const cleanDuplicates = async () => {
+  const forceReindex = async () => {
     try {
-      const res = await fetch('/api/clean-duplicates', { method: 'POST' });
-      const data = await res.json();
-      alert(data.message);
-      fetchStatus();
-      handleSearch(query);
+      const res = await fetch('/api/index', { method: 'POST' });
+      if (res.ok) {
+        alert("Indexing started in background.");
+        fetchStatus();
+        handleSearch(query);
+      }
     } catch (e) {
-      console.error("Clean duplicates failed", e);
+      console.error("Re-index failed", e);
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadStatus(null);
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setIsUploading(true); setUploadStatus(null);
     const formData = new FormData();
-    formData.append('file', file);
-
+    files.forEach(f => formData.append('files', f));
     try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      if (res.ok) {
-        setUploadStatus({ type: 'success', msg: `Successfully uploaded ${file.name}` });
-        fetchStatus();
-        if (query) handleSearch(query);
-      } else {
-        setUploadStatus({ type: 'error', msg: `Failed to upload ${file.name}` });
-      }
-    } catch (e) {
-      setUploadStatus({ type: 'error', msg: 'An error occurred during upload' });
-    } finally {
-      setIsSearching(false);
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      setTimeout(() => setUploadStatus(null), 5000);
-    }
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (res.ok) { setUploadStatus({ type: 'success', msg: `Uploaded ${files.length} file(s)` }); fetchStatus(); handleSearch(query); }
+      else setUploadStatus({ type: 'error', msg: 'Upload failed' });
+    } catch { setUploadStatus({ type: 'error', msg: 'Upload error' }); }
+    finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; setTimeout(() => setUploadStatus(null), 4000); }
   };
 
   useEffect(() => {
@@ -164,7 +204,23 @@ export default function App() {
   }, [previewFile]);
 
   return (
-    <div className="h-screen flex flex-col bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-blue-500/30">
+    <div className="h-screen flex flex-col bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-blue-500/30"
+      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      <AnimatePresence>
+        {isDragging && (
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            className="fixed inset-0 z-[100] bg-blue-600/10 backdrop-blur-sm border-4 border-dashed border-blue-500/50 flex items-center justify-center pointer-events-none">
+            <div className="text-center">
+              <span className="material-symbols-outlined text-6xl text-blue-400 mb-4 block">cloud_upload</span>
+              <p className="text-xl font-medium text-blue-300">Drop files to upload</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <header className="flex items-center justify-between px-8 py-5 border-b border-[#1F1F23] shrink-0">
         <div className="flex items-center gap-3 logo-animate">
           <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-white shadow-lg shadow-blue-600/20">LS</div>
@@ -181,7 +237,8 @@ export default function App() {
               type="file" 
               ref={fileInputRef} 
               onChange={handleFileUpload} 
-              className="hidden" 
+              className="hidden"
+              multiple
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
@@ -231,8 +288,10 @@ export default function App() {
                   value={query}
                   onChange={(e) => handleSearch(e.target.value)}
                   className="bg-transparent border-none focus:ring-0 w-full text-lg placeholder-[#52525B] outline-none"
-                  placeholder="Search local files (Cmd+K)"
+                  placeholder="Search local files (Ctrl+K)"
                   autoFocus
+                  onFocus={() => { if (!query && searchHistory.length) setShowHistory(true); }}
+                  onBlur={() => setTimeout(() => setShowHistory(false), 200)}
                 />
                 <div className="flex gap-2 items-center">
                   {query && (
@@ -245,21 +304,39 @@ export default function App() {
               </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-              {['', 'md', 'txt', 'csv', 'pdf', 'docx', 'json', 'ts', 'tsx'].map((ext) => (
-                <button
-                  key={ext}
-                  onClick={() => handleSearch(query, ext)}
-                  className={`px-3 py-1 text-xs rounded-full border transition-all whitespace-nowrap cursor-pointer ${
-                    extensionFilter === ext 
-                    ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-600/20' 
-                    : 'bg-[#1F1F23] border-[#2D2D33] text-[#71717A] hover:border-[#3F3F46]'
-                  }`}
-                >
-                  {ext === '' ? 'All Files' : `.${ext}`}
-                </button>
-              ))}
+            {/* Search History Dropdown */}
+            <AnimatePresence>
+              {showHistory && searchHistory.length > 0 && (
+                <motion.div initial={{opacity:0,y:-5}} animate={{opacity:1,y:0}} exit={{opacity:0}} className="absolute top-full left-0 right-0 mt-1 bg-[#151518] border border-[#2D2D33] rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="px-4 py-2 text-[10px] uppercase tracking-widest text-[#52525B] border-b border-[#1F1F23]">Recent Searches</div>
+                  {searchHistory.slice(0,8).map((h,i) => (
+                    <button key={i} onMouseDown={() => handleSearch(h)} className="w-full px-4 py-2.5 text-left text-sm text-[#A1A1AA] hover:bg-[#1F1F23] flex items-center gap-3 cursor-pointer">
+                      <span className="material-symbols-outlined text-sm text-[#52525B]">history</span>{h}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Filters & Sort */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar flex-1">
+                {['', 'md', 'txt', 'csv', 'pdf', 'docx', 'json', 'ts', 'tsx', 'js', 'py', 'html', 'css'].map((ext) => (
+                  <button key={ext} onClick={() => handleSearch(query, ext)}
+                    className={`px-3 py-1 text-xs rounded-full border transition-all whitespace-nowrap cursor-pointer ${
+                      extensionFilter === ext ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-600/20' : 'bg-[#1F1F23] border-[#2D2D33] text-[#71717A] hover:border-[#3F3F46]'
+                    }`}>
+                    {ext === '' ? 'All' : `.${ext}`}
+                  </button>
+                ))}
+              </div>
+              <select value={sortBy} onChange={(e) => handleSearch(query, extensionFilter, e.target.value)}
+                className="bg-[#1F1F23] border border-[#2D2D33] text-[#A1A1AA] text-xs rounded-lg px-2 py-1.5 outline-none cursor-pointer shrink-0">
+                <option value="relevance">Relevance</option>
+                <option value="name">Name</option>
+                <option value="date">Newest</option>
+                <option value="size">Largest</option>
+              </select>
             </div>
           </div>
 
@@ -302,7 +379,7 @@ export default function App() {
                                 {res.path}
                               </h3>
                               <p className="text-xs text-[#52525B] mt-0.5">
-                                Modified {res.modified_at} • {res.size || 'Unknown'}
+                                Modified {formatDate(res.modified_at)} • {typeof res.size === 'number' ? formatSize(res.size) : res.size || 'Unknown'}
                               </p>
                             </div>
                           </div>
@@ -361,25 +438,43 @@ export default function App() {
               </header>
               <div className="p-6 space-y-6">
                 <section>
+                  <h3 className="text-xs uppercase tracking-widest text-[#52525B] mb-3">Configuration</h3>
+                  <div className="bg-[#1F1F23] p-4 rounded-lg border border-[#2D2D33] space-y-3">
+                    <div>
+                      <label className="text-[10px] text-[#52525B] uppercase mb-1 block">Root Directory to Index</label>
+                      <input 
+                        type="text" 
+                        value={config?.index?.root_dir || ''} 
+                        onChange={(e) => setConfig({...config, index: {...config.index, root_dir: e.target.value}})}
+                        className="w-full bg-[#151518] text-sm text-[#A1A1AA] border border-[#2D2D33] rounded px-3 py-2 focus:border-blue-500/50 outline-none"
+                      />
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+                        alert("Configuration saved. Please force re-index.");
+                      }}
+                      className="w-full px-3 py-2 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      Save Configuration
+                    </button>
+                  </div>
+                </section>
+                
+                <section>
                   <h3 className="text-xs uppercase tracking-widest text-[#52525B] mb-3">Maintenance</h3>
                   <div className="space-y-3">
-                    <button 
-                      onClick={cleanDuplicates}
-                      className="w-full px-4 py-3 bg-blue-600/10 text-blue-400 rounded-xl border border-blue-500/20 hover:bg-blue-600 hover:text-white transition-all cursor-pointer flex items-center justify-between"
-                    >
-                      <span className="text-sm font-medium">Delete Duplicate Files</span>
-                      <span className="material-symbols-outlined text-sm">content_copy</span>
-                    </button>
-                    
-                    <button 
-                      onClick={() => { fetchStatus(); handleSearch(query); }}
-                      className="w-full px-4 py-3 bg-[#1F1F23] text-[#A1A1AA] rounded-xl border border-[#2D2D33] hover:border-[#3F3F46] transition-all cursor-pointer flex items-center justify-between"
-                    >
+                    <button onClick={forceReindex}
+                      className="w-full px-4 py-3 bg-[#1F1F23] text-[#A1A1AA] rounded-xl border border-[#2D2D33] hover:border-[#3F3F46] transition-all cursor-pointer flex items-center justify-between">
                       <span className="text-sm font-medium">Force Re-index</span>
                       <span className="material-symbols-outlined text-sm">refresh</span>
                     </button>
+                    <button onClick={async () => { const r = await fetch('/api/clean-duplicates', {method:'POST'}); const d = await r.json(); alert(d.message); fetchStatus(); handleSearch(query); }}
+                      className="w-full px-4 py-3 bg-red-500/5 text-red-400 rounded-xl border border-red-500/20 hover:bg-red-500/10 transition-all cursor-pointer flex items-center justify-between">
+                      <span className="text-sm font-medium">Remove Duplicates</span>
+                      <span className="material-symbols-outlined text-sm">content_copy</span>
+                    </button>
                   </div>
-                  <p className="text-xs text-[#52525B] mt-2 px-1">Analyzes file contents and improves database health.</p>
                 </section>
                 
                 <section>
@@ -423,26 +518,32 @@ export default function App() {
                 <div className="flex items-center gap-3">
                    <span className="text-xl">{getFileIcon(previewFile.path.split('.').pop() || '')}</span>
                    <h2 className="font-mono text-sm text-blue-400 truncate max-w-md">{previewFile.path}</h2>
+                   <button onClick={() => openExternal(previewFile.path)}
+                     className="ml-2 px-3 py-1 text-[10px] uppercase font-bold bg-blue-600/10 text-blue-400 hover:bg-blue-600 hover:text-white rounded border border-blue-500/20 transition-colors">Open in App</button>
+                   <button onClick={() => { setIsEditing(!isEditing); setEditContent(previewFile.content); }}
+                     className={`px-3 py-1 text-[10px] uppercase font-bold rounded border transition-colors ${isEditing ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-emerald-600/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600 hover:text-white'}`}>
+                     {isEditing ? 'Editing' : 'Edit'}</button>
                 </div>
-                <button 
-                  onClick={() => setPreviewFile(null)}
-                  className="w-8 h-8 rounded-full bg-[#1F1F23] border border-[#2D2D33] flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 transition-all cursor-pointer"
-                >
+                <button onClick={() => { setPreviewFile(null); setIsEditing(false); }}
+                  className="w-8 h-8 rounded-full bg-[#1F1F23] border border-[#2D2D33] flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 transition-all cursor-pointer">
                   <span className="material-symbols-outlined text-sm">close</span>
                 </button>
               </header>
-              <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-                <pre className="font-mono text-sm text-[#A1A1AA] whitespace-pre-wrap leading-relaxed">
-                  {previewFile.content}
-                </pre>
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                {isEditing ? (
+                  <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
+                    className="w-full h-full bg-[#0A0A0B] text-[#A1A1AA] font-mono text-sm border border-[#2D2D33] rounded-lg p-4 outline-none focus:border-blue-500/50 resize-none leading-relaxed" />
+                ) : (
+                  <pre className="font-mono text-sm text-[#A1A1AA] whitespace-pre-wrap leading-relaxed">{previewFile.content}</pre>
+                )}
               </div>
               <footer className="px-6 py-3 border-t border-[#1F1F23] bg-[#0A0A0B]/50 flex justify-end gap-3">
-                <button
-                   onClick={() => setPreviewFile(null)}
-                   className="px-4 py-2 bg-[#1F1F23] rounded-lg text-sm hover:bg-[#2D2D33] transition-colors cursor-pointer"
-                >
-                  Close
-                </button>
+                {isEditing && (
+                  <button onClick={() => saveFile(previewFile.path, editContent)}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 cursor-pointer">Save Changes</button>
+                )}
+                <button onClick={() => { setPreviewFile(null); setIsEditing(false); }}
+                   className="px-4 py-2 bg-[#1F1F23] rounded-lg text-sm hover:bg-[#2D2D33] transition-colors cursor-pointer">Close</button>
               </footer>
             </motion.div>
           </div>
@@ -475,16 +576,12 @@ export default function App() {
 
 function getFileIcon(ext: string) {
   const map: Record<string, string> = {
-    'md': '📝',
-    'txt': '📄',
-    'pdf': '📕',
-    'docx': '📘',
-    'rs': '⚙️',
-    'ts': '🏷️',
-    'tsx': '⚛️',
-    'js': '🟨',
-    'csv': '📊',
-    'json': '🔑',
+    'md': '📝', 'txt': '📄', 'pdf': '📕', 'docx': '📘', 'rs': '⚙️',
+    'ts': '🏷️', 'tsx': '⚛️', 'js': '🟨', 'csv': '📊', 'json': '🔑',
+    'py': '🐍', 'html': '🌐', 'css': '🎨', 'toml': '⚙️', 'yaml': '📋',
+    'yml': '📋', 'xml': '📋', 'sql': '🗄️', 'sh': '💻', 'bat': '💻',
+    'go': '🔵', 'rb': '💎', 'java': '☕', 'c': '🔧', 'cpp': '🔧',
+    'h': '🔧', 'log': '📜', 'env': '🔐', 'gitignore': '🚫',
   };
   return map[ext.toLowerCase()] || '📄';
 }

@@ -1,0 +1,23 @@
+{
+  "project": "LocalSearch",
+  "ideas": [
+    {
+      "title": "AI-Powered Summaries",
+      "description": "Use LLMs to generate summaries of indexed documents",
+      "priority": "high",
+      "status": "planned"
+    },
+    {
+      "title": "Tag System",
+      "description": "Allow users to tag files with custom labels for better organization",
+      "priority": "medium",
+      "status": "backlog"
+    },
+    {
+      "title": "Version History",
+      "description": "Track file changes and allow rollback to previous versions",
+      "priority": "low",
+      "status": "backlog"
+    }
+  ]
+}

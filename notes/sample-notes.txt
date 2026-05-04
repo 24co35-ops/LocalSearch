@@ -1,0 +1,21 @@
+Meeting Notes - Project Alpha
+Date: May 2026
+
+Key Decisions:
+- Migrate to microservices architecture
+- Adopt TypeScript for all new services
+- Implement CI/CD pipeline with GitHub Actions
+
+Action Items:
+1. Set up Docker development environment
+2. Create API gateway service
+3. Write integration tests for auth module
+4. Schedule security review for Q3
+
+Team Members:
+- Alice (Lead Developer)
+- Bob (Backend Engineer)
+- Charlie (DevOps)
+- Diana (QA Engineer)
+
+Next Meeting: Friday 3pm IST

@@ -29,7 +29,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/config", get(get_config_handler))
         .route("/api/config", post(save_config_handler))
         .route("/api/open", post(open_file_handler))
-        .fallback_service(ServeDir::new("static"))
+        .fallback_service(ServeDir::new("../dist"))
         .with_state(state)
 }
 
@@ -79,13 +79,23 @@ struct StatusResponse {
 
 async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     let config = state.config.read().await;
-    let file_count = 0; // In real app: query index for count
-    let index_size_mb = 0.0; // In real app: check disk size
+    
+    let file_count = state.index_manager.index.reader().map(|r| r.searcher().num_docs() as usize).unwrap_or(0);
+    
+    let store_path = crate::config::resolve_path(&config.index.store_path);
+    let index_size_bytes: u64 = std::fs::read_dir(&store_path)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|meta| meta.len())
+        .sum();
+    let index_size_mb = index_size_bytes as f64 / (1024.0 * 1024.0);
     
     Json(StatusResponse {
         file_count,
         index_size_mb,
-        last_indexed: "2026-05-04T08:00:00Z".to_string(), // In real app: track this
+        last_indexed: chrono::Utc::now().to_rfc3339(), 
         watcher_active: true,
         indexed_dirs: vec![config.index.root_dir.clone()],
     })
