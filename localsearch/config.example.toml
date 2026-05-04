@@ -1,0 +1,25 @@
+[index]
+# The directory you want to search
+root_dir = "~/notes"
+# Where to store the search index
+store_path = "~/.localsearch/index"
+# Skip files larger than this
+max_file_size_mb = 50
+
+[watcher]
+# Batch events within this window (ms)
+debounce_ms = 500
+# Directories/files to ignore during indexing
+ignore_patterns = [".git", "node_modules", "target", "__pycache__", ".DS_Store"]
+
+[search]
+# Number of results per query
+default_limit = 10
+# Characters of preview context around matches
+snippet_context_chars = 100
+# Boost score of recently modified files
+recency_boost = true
+
+[server]
+port = 7474
+host = "127.0.0.1"

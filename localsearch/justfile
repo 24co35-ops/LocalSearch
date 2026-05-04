@@ -1,0 +1,25 @@
+# Justfile for LocalSearch
+
+# Build the binary
+build:
+    cargo build
+
+# Run the search server
+run:
+    cargo run -- serve
+
+# Run tests
+test:
+    cargo test
+
+# Build release binary
+release:
+    cargo build --release
+
+# Re-index everything
+index:
+    cargo run -- index
+
+# Watch for changes
+watch:
+    cargo run -- watch

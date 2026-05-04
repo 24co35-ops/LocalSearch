@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>LocalSearch</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-surface-variant": "#ccc3d8",
+                        "surface": "#15121b",
+                        "primary-container": "#7c3aed",
+                        "surface-tint": "#d2bbff",
+                        "surface-variant": "#37333e",
+                        "surface-container-lowest": "#100d16",
+                        "surface-container": "#221e28",
+                        "tertiary-container": "#a15100",
+                        "primary-fixed": "#eaddff",
+                        "secondary-container": "#47464b",
+                        "on-tertiary": "#4f2500",
+                        "on-error": "#690005",
+                        "on-surface": "#e8dfee",
+                        "outline-variant": "#4a4455",
+                        "on-secondary-fixed-variant": "#47464b",
+                        "secondary": "#c8c6cb",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-high": "#2c2833",
+                        "on-background": "#e8dfee",
+                        "on-secondary-container": "#b6b4b9",
+                        "surface-bright": "#3c3742",
+                        "tertiary-fixed-dim": "#ffb784",
+                        "on-primary-fixed": "#25005a",
+                        "inverse-surface": "#e8dfee",
+                        "error-container": "#93000a",
+                        "tertiary-fixed": "#ffdcc6",
+                        "on-secondary": "#303034",
+                        "secondary-fixed": "#e4e1e7",
+                        "on-secondary-fixed": "#1b1b1f",
+                        "background": "#15121b",
+                        "inverse-primary": "#732ee4",
+                        "surface-dim": "#15121b",
+                        "surface-container-highest": "#37333e",
+                        "on-tertiary-fixed": "#301400",
+                        "surface-container-low": "#1d1a24",
+                        "on-primary-container": "#ede0ff",
+                        "on-primary": "#3f008e",
+                        "inverse-on-surface": "#332f39",
+                        "error": "#ffb4ab",
+                        "on-primary-fixed-variant": "#5a00c6",
+                        "secondary-fixed-dim": "#c8c6cb",
+                        "primary": "#d2bbff",
+                        "on-tertiary-container": "#ffe0cd",
+                        "on-tertiary-fixed-variant": "#713700",
+                        "outline": "#958da1",
+                        "tertiary": "#ffb784",
+                        "primary-fixed-dim": "#d2bbff"
+                    },
+                    fontFamily: {
+                        "sans": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-[#0e0e10] text-on-surface h-screen w-screen overflow-hidden">
+    <!-- Navbar -->
+    <nav class="fixed top-0 w-full h-12 z-50 bg-[#0e0e10] border-b border-[#2e2e32] flex justify-between items-center px-3 text-[#7c3aed]">
+        <div class="flex items-center w-full max-w-4xl">
+            <span class="text-lg font-bold tracking-tighter text-white mr-6 shrink-0">LocalSearch</span>
+            <div class="flex items-center flex-grow relative group" id="search-container">
+                <span class="material-symbols-outlined text-secondary text-[18px] mr-2">search</span>
+                <input id="search-input" class="w-full bg-transparent border-none text-on-surface font-sans text-[16px] py-2 outline-none focus:ring-0 placeholder:text-outline-variant" placeholder="Search files, contents, or commands..." type="text" autofocus />
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="settings-toggle" class="w-8 h-8 rounded hover:bg-[#2e2e32] transition-colors text-gray-400 hover:text-white">
+                <span class="material-symbols-outlined text-[20px]">settings</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside class="fixed left-0 top-12 bottom-8 w-64 bg-[#1a1a1e] border-r border-[#2e2e32] flex flex-col pt-4 z-40">
+        <div class="px-4 mb-4">
+            <h2 class="text-[11px] uppercase tracking-widest font-semibold text-[#7c3aed]">INDEX</h2>
+            <p class="text-[10px] text-secondary mt-0.5">Local Storage</p>
+        </div>
+        <nav class="flex flex-col mb-6">
+            <a class="nav-item group" href="#" data-view="directories">
+                <span class="material-symbols-outlined text-[16px]">folder</span>
+                <span>Directories</span>
+            </a>
+            <a class="nav-item group" href="#" data-view="file_types">
+                <span class="material-symbols-outlined text-[16px]">category</span>
+                <span>File Types</span>
+            </a>
+            <a class="nav-item group" href="#" data-view="tags">
+                <span class="material-symbols-outlined text-[16px]">label</span>
+                <span>Tags</span>
+            </a>
+            <a class="nav-item active group" href="#" data-view="recent">
+                <span class="material-symbols-outlined text-[16px]">history</span>
+                <span>Recent</span>
+            </a>
+        </nav>
+        <div id="active-filters" class="px-4 flex flex-col gap-2">
+            <h3 class="text-[11px] text-secondary mb-1">ACTIVE FILTERS</h3>
+            <div class="flex flex-wrap gap-2" id="filter-chips">
+                <!-- Chips added here -->
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="absolute top-12 left-64 right-0 bottom-8 p-3 overflow-y-auto bg-[#0e0e10]" id="main-content">
+        <div class="max-w-4xl mx-auto flex flex-col gap-2" id="results-list">
+            <!-- Initial/Recent View -->
+            <div id="initial-view" class="mt-20 flex flex-col items-center">
+                <div class="w-full max-w-lg">
+                    <div class="text-[11px] text-outline-variant uppercase tracking-wider mb-2">Recent Searches</div>
+                    <div class="flex flex-col border border-[#2e2e32] rounded bg-[#15121b] overflow-hidden" id="recent-list">
+                        <!-- Recent items mapped here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="fixed inset-0 z-[70] hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-[2px]" id="settings-overlay"></div>
+        <div class="absolute right-0 top-0 bottom-0 w-[420px] bg-[#221e28] border-l border-[#4a4455] shadow-2xl flex flex-col translate-x-full transition-transform duration-300" id="settings-content">
+            <header class="h-12 border-b border-[#4a4455] flex justify-between items-center px-4">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-white text-[18px]">tune</span>
+                    <h2 class="font-semibold text-white">Settings</h2>
+                </div>
+                <button id="settings-close" class="text-on-surface-variant hover:text-white">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </header>
+            <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+                <section>
+                    <h3 class="text-[11px] uppercase tracking-widest text-outline-variant mb-3 border-b border-[#4a4455] pb-1">Appearance</h3>
+                    <div class="bg-[#2c2833] p-3 rounded flex justify-between items-center border border-[#4a4455]">
+                        <span class="text-sm">System Theme</span>
+                        <div class="flex bg-[#100d16] p-[2px] rounded border border-[#4a4455]">
+                            <button class="px-3 py-1 bg-[#37333e] text-white text-[11px] rounded border border-white/10">Dark</button>
+                            <button class="px-3 py-1 text-on-surface-variant text-[11px]">Light</button>
+                        </div>
+                    </div>
+                </section>
+                <section>
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-[11px] uppercase tracking-widest text-outline-variant">Indexed Directories</h3>
+                        <button class="text-[#d2bbff] text-[11px] bg-[#d2bbff]/10 px-2 py-1 rounded border border-[#d2bbff]/20">+ Add Path</button>
+                    </div>
+                    <div class="flex flex-col gap-1" id="indexed-dirs">
+                        <!-- Dirs -->
+                    </div>
+                </section>
+                <section>
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-[11px] uppercase tracking-widest text-outline-variant">Exclude Patterns</h3>
+                        <button class="text-[#d2bbff] text-[11px] bg-[#d2bbff]/10 px-2 py-1 rounded border border-[#d2bbff]/20">+ Add Pattern</button>
+                    </div>
+                    <div class="flex flex-wrap gap-2" id="exclude-patterns">
+                        <!-- Patterns -->
+                    </div>
+                </section>
+            </div>
+            <div class="p-4 border-t border-[#4a4455]">
+                <button id="save-rebuild" class="w-full bg-[#2c2833] hover:bg-[#3c3742] py-3 rounded text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 border border-[#4a4455]">
+                    <span class="material-symbols-outlined text-[16px] text-[#d2bbff]">database</span>
+                    Save & Rebuild Index
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="fixed bottom-0 w-full h-8 px-4 flex items-center justify-between z-50 bg-[#0e0e10] border-t border-[#2e2e32] font-mono text-[10px] uppercase text-[#7c3aed]">
+        <div id="system-status" class="text-gray-500 cursor-pointer hover:text-white transition-colors">System Status: Active</div>
+        <div class="flex items-center gap-6">
+            <span id="index-stats" class="text-gray-500">Index: 0 files</span>
+            <span id="watcher-status" class="flex items-center gap-1.5 text-gray-500">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                Watcher: Live
+            </span>
+            <button id="reindex-btn" class="hover:text-white transition-colors">Reindex</button>
+        </div>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

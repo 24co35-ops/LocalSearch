@@ -1,0 +1,65 @@
+/* LocalSearch Custom Styles */
+
+:root {
+    --primary: #7c3aed;
+}
+
+/* Material Symbols sizing */
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+}
+*:hover::-webkit-scrollbar-thumb {
+    background: #2e2e32;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #4a4455;
+}
+
+/* Terminal Cursor */
+#search-container:focus-within::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 18px;
+    background-color: var(--primary);
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: -2px;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* Sidebar Nav Items */
+.nav-item {
+    @apply flex items-center gap-3 px-3 py-2 text-gray-500 hover:text-gray-200 hover:bg-[#2e2e32] transition-all duration-100 text-[11px] uppercase tracking-widest font-semibold border-l-2 border-transparent;
+}
+
+.nav-item.active {
+    @apply text-[#7c3aed] border-l-[#7c3aed] bg-[#7c3aed]/10;
+}
+
+/* Typography Overrides */
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Highlighted search terms */
+mark {
+    @apply bg-[#7c3aed] text-white px-0.5 rounded-sm;
+}
