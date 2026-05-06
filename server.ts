@@ -17,6 +17,22 @@ function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Language detection from extension
+function detectLanguage(ext: string): string {
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+    py: 'python', rs: 'rust', go: 'go', rb: 'ruby', java: 'java',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+    html: 'html', css: 'css', scss: 'scss', less: 'less',
+    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+    md: 'markdown', txt: 'plaintext', sql: 'sql',
+    sh: 'bash', bat: 'batch', ps1: 'powershell',
+    xml: 'xml', svg: 'xml', csv: 'csv',
+    env: 'dotenv', gitignore: 'gitignore', dockerfile: 'dockerfile',
+  };
+  return map[ext.toLowerCase()] || 'plaintext';
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -173,6 +189,83 @@ async function startServer() {
     });
   });
 
+  // ─── File Tree API ───
+  app.get('/api/tree', (_req, res) => {
+    interface TreeNode {
+      name: string;
+      path: string;
+      type: 'file' | 'directory';
+      extension?: string;
+      size?: number;
+      children?: TreeNode[];
+    }
+
+    const buildTree = (dir: string, relativeTo: string): TreeNode[] => {
+      const nodes: TreeNode[] = [];
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          if (['node_modules', '.git', 'target', '__pycache__', 'dist'].includes(entry.name)) continue;
+          
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(relativeTo, fullPath).replace(/\\/g, '/');
+
+          if (entry.isDirectory()) {
+            nodes.push({
+              name: entry.name,
+              path: relPath,
+              type: 'directory',
+              children: buildTree(fullPath, relativeTo),
+            });
+          } else {
+            const stats = fs.statSync(fullPath);
+            nodes.push({
+              name: entry.name,
+              path: relPath,
+              type: 'file',
+              extension: path.extname(entry.name).slice(1).toLowerCase(),
+              size: stats.size,
+            });
+          }
+        }
+      } catch {}
+      // Sort: directories first, then files alphabetically
+      nodes.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      return nodes;
+    };
+
+    res.json({ tree: buildTree(INDEX_ROOT, INDEX_ROOT), root: INDEX_ROOT });
+  });
+
+  // ─── Create New File ───
+  app.post('/api/create', (req, res) => {
+    const { filename, content = '', directory = '' } = req.body;
+    if (!filename) return res.status(400).json({ error: 'Filename required' });
+
+    // Sanitize
+    const safeName = filename.replace(/[<>:"|?*]/g, '');
+    const targetDir = directory ? path.join(INDEX_ROOT, directory) : INDEX_ROOT;
+    const fullPath = path.join(targetDir, safeName);
+    
+    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).json({ error: 'Forbidden' });
+
+    try {
+      if (fs.existsSync(fullPath)) {
+        return res.status(409).json({ error: 'File already exists' });
+      }
+      if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(fullPath, content, 'utf8');
+      const relPath = path.relative(INDEX_ROOT, fullPath).replace(/\\/g, '/');
+      res.json({ message: 'File created', path: relPath });
+    } catch (e) {
+      res.status(500).json({ error: 'Error creating file' });
+    }
+  });
+
   app.get('/api/search', (req, res) => {
     const start = performance.now();
     const query = req.query.q as string;
@@ -239,7 +332,7 @@ async function startServer() {
         searchTerms.forEach(term => {
           const escaped = escapeRegExp(term);
           const reg = new RegExp(`(${escaped})`, 'gi');
-          snippet = snippet.replace(reg, '<mark class="bg-blue-500/30 text-blue-100 rounded px-0.5">$1</mark>');
+          snippet = snippet.replace(reg, '<mark class="search-highlight">$1</mark>');
         });
       } else {
         snippet = content.slice(0, 160) + (content.length > 160 ? '...' : '');
@@ -268,7 +361,6 @@ async function startServer() {
     } else if (sortBy === 'size') {
       formattedResults.sort((a, b) => (b.size as number) - (a.size as number));
     }
-    // 'relevance' is default, already sorted by score
 
     // Re-rank after sort
     formattedResults.forEach((r, i) => r.rank = i + 1);
@@ -286,20 +378,20 @@ async function startServer() {
 
   app.delete('/api/delete', (req, res) => {
     const filePath = req.query.path as string;
-    if (!filePath) return res.status(400).send('Path required');
+    if (!filePath) return res.status(400).json({ error: 'Path required' });
 
     const fullPath = path.join(INDEX_ROOT, filePath);
-    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).send('Forbidden');
+    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).json({ error: 'Forbidden' });
 
     try {
       if (fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath);
         res.json({ message: 'File deleted' });
       } else {
-        res.status(404).send('File not found');
+        res.status(404).json({ error: 'File not found' });
       }
     } catch (e) {
-      res.status(500).send('Error deleting file');
+      res.status(500).json({ error: 'Error deleting file' });
     }
   });
 
@@ -342,35 +434,38 @@ async function startServer() {
 
   app.get('/api/read', (req, res) => {
     const filePath = req.query.path as string;
-    if (!filePath) return res.status(400).send('Path required');
+    if (!filePath) return res.status(400).json({ error: 'Path required' });
 
     const fullPath = path.join(INDEX_ROOT, filePath);
-    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).send('Forbidden');
+    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).json({ error: 'Forbidden' });
 
     try {
       if (fs.existsSync(fullPath)) {
         const content = fs.readFileSync(fullPath, 'utf8');
         const stats = fs.statSync(fullPath);
+        const ext = path.extname(filePath).slice(1).toLowerCase();
         res.json({
           content,
           size: stats.size,
           modified_at: stats.mtime.toISOString(),
-          extension: path.extname(filePath).slice(1),
+          extension: ext,
+          language: detectLanguage(ext),
+          line_count: content.split('\n').length,
         });
       } else {
-        res.status(404).send('File not found');
+        res.status(404).json({ error: 'File not found' });
       }
     } catch (e) {
-      res.status(500).send('Error reading file');
+      res.status(500).json({ error: 'Error reading file' });
     }
   });
 
   app.put('/api/save', (req, res) => {
     const { path: filePath, content } = req.body;
-    if (!filePath) return res.status(400).send('Path required');
+    if (!filePath) return res.status(400).json({ error: 'Path required' });
 
     const fullPath = path.join(INDEX_ROOT, filePath);
-    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).send('Forbidden');
+    if (!fullPath.startsWith(INDEX_ROOT)) return res.status(403).json({ error: 'Forbidden' });
 
     try {
       // Ensure directory exists for nested files
@@ -380,13 +475,13 @@ async function startServer() {
       fs.writeFileSync(fullPath, content, 'utf8');
       res.json({ message: 'File saved successfully' });
     } catch (e) {
-      res.status(500).send('Error saving file');
+      res.status(500).json({ error: 'Error saving file' });
     }
   });
 
   app.post('/api/upload', upload.array('files', 20), (req, res) => {
     const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) return res.status(400).send('No files uploaded');
+    if (!files || files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
     res.json({
       message: `${files.length} file(s) uploaded successfully`,
       paths: files.map(f => f.originalname),
@@ -401,7 +496,7 @@ async function startServer() {
       res.sendStatus(200);
     } catch (e) {
       console.error(e);
-      res.status(500).send('Error opening file');
+      res.status(500).json({ error: 'Error opening file' });
     }
   });
 
